@@ -38,7 +38,10 @@ def test_cross_validate():
     assert bad["authoritative_score"] == m.score
     missing = cross_validate("Atlantis", "Narnia", "1-0", idx)
     assert missing["status"] == "espn_only"
-    print("  cross_validate: match/mismatch/espn_only OK")
+    # ESPN uses "Congo DR"; openfootball indexes as "DR Congo"
+    congo = cross_validate("Portugal", "Congo DR", "1-1", idx)
+    assert congo["status"] == "match", f"Congo DR alias failed: {congo}"
+    print("  cross_validate: match/mismatch/espn_only/Congo DR alias OK")
 
 
 def test_knockout_engine():

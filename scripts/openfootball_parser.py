@@ -86,6 +86,25 @@ def of_to_espn(name: str) -> str:
     return OF_NAME_TO_ESPN.get(name, name)
 
 
+# ESPN displayName → openfootball 索引 canonical key
+ESPN_NAME_CANONICAL: Dict[str, str] = {
+    "Congo DR": "DR Congo",
+    "Democratic Republic of Congo": "DR Congo",
+    "Korea Republic": "South Korea",
+    "Czech Republic": "Czechia",
+    "Bosnia and Herzegovina": "Bosnia-Herzegovina",
+    "USA": "United States",
+    "Turkey": "Türkiye",
+    "Curacao": "Curaçao",
+    "Côte d'Ivoire": "Ivory Coast",
+}
+
+
+def canonical_espn_name(name: str) -> str:
+    name = name.strip()
+    return ESPN_NAME_CANONICAL.get(name, name)
+
+
 def parse_score(score: str) -> Tuple[int, int]:
     a, b = score.split("-", 1)
     return int(a), int(b)
@@ -153,7 +172,9 @@ def cross_validate(
     espn_score: str,
     of_index: Dict[str, OpenFootballMatch],
 ) -> dict:
-    key = match_key(espn_home_en, espn_away_en)
+    key = match_key(
+        canonical_espn_name(espn_home_en), canonical_espn_name(espn_away_en)
+    )
     ofm = of_index.get(key)
     if not ofm:
         return {
