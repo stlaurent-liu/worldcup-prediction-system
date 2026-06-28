@@ -55,6 +55,7 @@ python3 scripts/monte-carlo-tournament.py --iterations 50000
 
 ## Pitfalls
 
-1. Draw prediction = 0: Structural Poisson defect, needs GBM supplement
-2. Elo diff 0-100 worst accuracy: Low differentiation when close
-3. European teams underestimated: Elo can't capture squad depth + tournament pedigree
+1. **Motivation inversion**: `must_win` home vs `already_eliminated` away — do not bet eliminated underdog on high odds. Case: DR Congo 3-1 Uzbekistan (`references/20260628-drcongo-uzbekistan-motivation-miss.md`)
+2. Draw prediction = 0: Structural Poisson defect, needs GBM supplement
+3. Elo diff 0-100 worst accuracy: Low differentiation when close
+4. European teams underestimated: Elo can't capture squad depth + tournament pedigree

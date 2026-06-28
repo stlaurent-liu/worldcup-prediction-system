@@ -387,6 +387,7 @@ Always classify each team:
 - `first_place_push`: the team has a strong reason to win the group, such as a materially better knockout path or host advantage.
 - `goal_difference_chasing`: needs margin, which can support late pressure and bigger scorelines.
 - `already_qualified_or_nearly`: may lower pressing, rotate, slow tempo, or protect stars.
+- `already_eliminated`: mathematically cannot qualify; often lowers intensity, rotation, and defensive organization — **do not bet this team to win unless opponent is also resting heavily**. See `references/20260628-drcongo-uzbekistan-motivation-miss.md`.
 - `injury_conservation`: likely to reduce duels, avoid unnecessary tempo, or substitute core players early.
 - `third_round_rotation_risk`: strongest in the final group match when qualification math allows rest.
 - `protective_rotation`: rotation intended to protect core players, reduce injury/card risk, and lower tempo.
@@ -403,6 +404,7 @@ Adjust market interpretation:
 - Goal-difference incentives can justify continued pressure after a lead, but only when coach style and environment support it.
 - If same-group live scores change the objective, rebuild the live scenario distribution immediately.
 - Do not treat rotation as automatically conservative. Classify `protective_rotation` versus `competitive_rotation`.
+- **`must_win` vs `already_eliminated` asymmetry (verified 2026-06-28):** When the home team must win and the away team is already eliminated (0 pts, no qualification path), default to the motivated home side. Do not treat the eliminated underdog's high odds (e.g. 5.00 away win) as positive EV. Never migrate a stale "weak team will rotate" narrative from an earlier match against a strong opponent (e.g. DR Congo vs Colombia R2) onto a later must-win fixture against an eliminated opponent.
 
 ## Game Management Model
 
@@ -1144,6 +1146,7 @@ Final whistle → Per-ticket settlement (template: references/post-match-settlem
 - **Model**: Poisson draw structural defect, Elo-xG uncorrelated (R²=0.0095), draw correction must scale with Elo gap
 - **Data sources**: WhoScored second-request 403, 500.com gb2312 encoding, Sporttery date timezone offset
 - **Betting**: Same-match parlay illegal; all play types per-match single eligibility (`singleList`); HAD may be unsold; never map overseas AH/O-U to Sporttery; HAFU not handicap-adjusted; score parlay worst ROI (-85.7%); **2元/注** — Markowitz amounts must be quantized via `quantize_stake` before purchase output (overseas continuous stakes invalid on Sporttery)
+- **Motivation**: `must_win` home vs `already_eliminated` away — do not bet eliminated underdog win on high odds; do not reuse stale "will rotate" narrative across rounds (`references/20260628-drcongo-uzbekistan-motivation-miss.md`, DR Congo 3-1 Uzbekistan 2026-06-27)
 - **Scraping**: 3 regex failures → change approach, zgzcw 3-layer WAF impassable, Wikipedia Elo unreliable
 
 ## Module Navigation
@@ -1171,6 +1174,7 @@ Use these bundled files for detailed implementation guidance:
 - `venue-environment.md` — 16 venue altitude/temperature/precipitation data
 - `weak-home-strong-away-strategy.md` — Weak home vs strong away betting strategy
 - `post-match-settlement.md` — Post-match settlement template
+- `20260628-drcongo-uzbekistan-motivation-miss.md` — **动机轴读反校准**：must_win vs already_eliminated，070 场 2串1 教训
 - `data-source-availability.md` — Data source availability status table
 - `sporttery-json-format.md` — Sporttery API JSON format + poolCode mapping (updated 2026-06-27 with HAD-not-available finding and reliable parse code)
 - `multi-match-budget-allocation.md` — Multi-match budget allocation workflow (Step-by-step: verify odds → verify standings → model → incentive → EV sort → Markowitz → output)
