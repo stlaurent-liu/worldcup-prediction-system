@@ -16,9 +16,12 @@ Outputs:
     - 95% confidence intervals (binomial approximation)
 """
 
-import math, json, random, argparse
+import math, json, random, argparse, sys
 from collections import defaultdict
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from knockout_engine import resolve_knockout_winner
 
 def elo_expected(r_a, r_b):
     return 1 / (1 + 10 ** ((r_b - r_a) / 400))
@@ -35,22 +38,27 @@ def elo_probs(diff, draw_base=0.24, draw_k=500):
     remaining = 1 - draw_pct
     return p_win_raw * remaining, draw_pct, (1 - p_win_raw) * remaining
 
-def simulate_match(team_a, team_b, elo_ratings, knockout=False):
+def simulate_match(team_a, team_b, elo_ratings, knockout=False, use_absences=True):
     """Simulate a single match. Returns winner.
-    
-    PITFALL: In knockout matches, use QDR/depth adjustments on Elo.
-    Group stage uses raw Elo only.
+
+    Knockout draws use Bayesian PK model (103-game prior + Elo soft signal)
+    via knockout_engine.resolve_knockout_winner — not 50/50.
     """
     ea = elo_ratings.get(team_a, 1500)
     eb = elo_ratings.get(team_b, 1500)
+
+    if knockout:
+        return resolve_knockout_winner(
+            team_a, team_b, ea, eb, use_absences=use_absences
+        )
+
     diff = ea - eb
     p_h, p_d, p_a = elo_probs(diff)
-    
+
     r = random.random()
     if r < p_h:
         return team_a
     elif r < p_h + p_d:
-        # Draw: knockout uses penalty shootout (50-50)
         return team_a if random.random() < 0.5 else team_b
     else:
         return team_b
@@ -83,7 +91,7 @@ def simulate_group(teams, elo_ratings):
     sorted_teams = sorted(teams, key=lambda t: (points[t], gd[t]), reverse=True)
     return sorted_teams[0], sorted_teams[1], sorted_teams[2]
 
-def run_simulation(groups, elo_ratings, n_iterations=50000):
+def run_simulation(groups, elo_ratings, n_iterations=50000, use_absences=True):
     """Run full tournament simulation.
     
     Returns dict with champion/semifinal/quarterfinal probabilities.
@@ -123,30 +131,40 @@ def run_simulation(groups, elo_ratings, n_iterations=50000):
             pos_b = int(seed_b[1]) - 1
             team_a = gr[g_a][pos_a]
             team_b = gr[g_b][pos_b] if pos_b < 3 else best3[int(g_b, 36) - 10] if len(best3) > int(g_b, 36) - 10 else best3[0]
-            w = simulate_match(team_a, team_b, elo_ratings, knockout=True)
+            w = simulate_match(
+                team_a, team_b, elo_ratings, knockout=True, use_absences=use_absences
+            )
             r32w.append(w)
             r16[w] += 1
         
         # R16, QF, SF, Final
         r16w = []
         for i in range(0, min(16, len(r32w)), 2):
-            w = simulate_match(r32w[i], r32w[i+1], elo_ratings, knockout=True)
+            w = simulate_match(
+                r32w[i], r32w[i + 1], elo_ratings, knockout=True, use_absences=use_absences
+            )
             r16w.append(w)
             qf[w] += 1
         
         qfw = []
         for i in range(0, min(8, len(r16w)), 2):
-            w = simulate_match(r16w[i], r16w[i+1], elo_ratings, knockout=True)
+            w = simulate_match(
+                r16w[i], r16w[i + 1], elo_ratings, knockout=True, use_absences=use_absences
+            )
             qfw.append(w)
             sf[w] += 1
         
         sfw = []
         for i in range(0, min(4, len(qfw)), 2):
-            w = simulate_match(qfw[i], qfw[i+1], elo_ratings, knockout=True)
+            w = simulate_match(
+                qfw[i], qfw[i + 1], elo_ratings, knockout=True, use_absences=use_absences
+            )
             sfw.append(w)
         
         if len(sfw) >= 2:
-            c = simulate_match(sfw[0], sfw[1], elo_ratings, knockout=True)
+            c = simulate_match(
+                sfw[0], sfw[1], elo_ratings, knockout=True, use_absences=use_absences
+            )
             champ[c] += 1
     
     return {

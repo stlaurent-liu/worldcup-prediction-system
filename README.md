@@ -37,8 +37,15 @@
 
 ### 赛后数据管道
 
-- `wc2026_results_sync.py`：ESPN 赛果 → 动机标签 → **加权 Elo** 更新
+- `wc2026_results_sync.py`：ESPN 赛果 → **openfootball 交叉校验** → 动机标签 → **加权 Elo** 更新
+- 比分冲突时以 [openfootball/worldcup](https://github.com/openfootball/worldcup) 为准
 - 本机 cron（12:00 / 23:00 BJT），**2026-07-20 自动卸载**
+
+### 淘汰赛增强（借鉴 targetFuseLab）
+
+- `knockout_engine.py`：缺阵 Elo 扣减 + 点球贝叶斯模型（103 场先验）
+- `monte-carlo-tournament.py` 淘汰赛平局不再 50/50，走 `resolve_knockout_winner()`
+- 编辑 `config/squad_absences.json` 录入赛前缺阵（中文队名）
 
 ---
 
@@ -97,7 +104,9 @@ bash scripts/setup_wc2026_cron.sh --remove     # 手动卸载
 
 | Script | Purpose |
 |--------|---------|
-| `wc2026_results_sync.py` | ESPN 赛果同步 + 动机标签 + Elo |
+| `wc2026_results_sync.py` | ESPN 赛果 + openfootball 校验 + 动机标签 + Elo |
+| `knockout_engine.py` | 淘汰赛缺阵扣减 + 点球贝叶斯模型 |
+| `openfootball_parser.py` | openfootball 赛果解析与交叉验证 |
 | `kelly_engine.py` | Kelly / EV + `quantize_stake`（2元/注） |
 | `odds_ev_analysis.py` | 六种玩法 EV 扫描 |
 | `multi_bookmaker_engine.py` | 多庄家去水聚合 |
@@ -147,6 +156,7 @@ Fusion (knockout):     elo 40% + odds 30% + xg 15% + form 10% + fifa 5%
 | Source | Use |
 |--------|-----|
 | ESPN API | 赛果、积分榜 |
+| openfootball/worldcup | 赛果交叉校验（CC0 Football.TXT） |
 | Sporttery API | 体彩赔率、singleList |
 | Titan007 | 93–187 家亚盘去水 |
 | worldcupwiki.com | 比分备用 |

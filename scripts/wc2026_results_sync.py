@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Tuple
 
 from cron_expiry import TOURNAMENT_CRON_LAST_DAY, guard_cron_at_start, maybe_retire_cron_after_run
 from db_path import get_db_path
+from openfootball_parser import cross_validate, index_matches, load_openfootball_matches
 
 ESPN_SCOREBOARD = (
     "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates={date}"
@@ -122,6 +123,8 @@ CREATE TABLE IF NOT EXISTS wc2026_match_records (
     away_elo_after REAL,
     synced_at TEXT,
     source TEXT DEFAULT 'espn',
+    verification_status TEXT,
+    openfootball_score TEXT,
     notes TEXT,
     UNIQUE(match_date, home_team_cn, away_team_cn)
 );
@@ -154,6 +157,14 @@ def fetch_json(url: str) -> dict:
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_SQL)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(wc2026_match_records)")}
+    for col, typ in (
+        ("verification_status", "TEXT"),
+        ("openfootball_score", "TEXT"),
+        ("source", "TEXT"),
+    ):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE wc2026_match_records ADD COLUMN {col} {typ}")
     conn.commit()
 
 
@@ -358,6 +369,15 @@ def sync(
     ensure_schema(conn)
     team_groups = load_team_groups(conn)
 
+    of_index = {}
+    of_load_error = None
+    try:
+        of_index = index_matches(load_openfootball_matches())
+        print(f"[openfootball] loaded {len(of_index)} completed matches for cross-check")
+    except Exception as exc:
+        of_load_error = str(exc)
+        print(f"[warn] openfootball fetch failed: {exc}")
+
     existing_rows = []
     for row in conn.execute(
         """SELECT match_date, group_name, home_team_cn, away_team_cn,
@@ -388,11 +408,28 @@ def sync(
 
     fetched.sort(key=lambda x: (x["match_date"], x["home_team_cn"]))
     updated = 0
+    verify_match = verify_mismatch = verify_espn_only = 0
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     all_records = list(existing_rows)
 
     for m in fetched:
+        v = cross_validate(
+            m["home_team_en"], m["away_team_en"], m["score"], of_index
+        )
+        m["verification_status"] = v["status"]
+        m["openfootball_score"] = v.get("openfootball_score")
+        if v["status"] == "match":
+            verify_match += 1
+        elif v["status"] == "mismatch":
+            verify_mismatch += 1
+            auth = v["authoritative_score"]
+            hg, ag = map(int, auth.split("-"))
+            m["home_score"], m["away_score"], m["score"] = hg, ag, auth
+            print(f"[verify] mismatch fixed: {m['home_team_cn']} vs {m['away_team_cn']} -> {auth}")
+        else:
+            verify_espn_only += 1
+
         grp = team_groups.get(m["home_team_cn"]) or team_groups.get(m["away_team_cn"]) or ""
         m["group_name"] = grp
         m["round_num"] = team_round(m["home_team_cn"], grp, m["match_date"], all_records)
@@ -429,6 +466,12 @@ def sync(
             notes.append("控分/轮换风险场次，Elo已降权")
         if blowout_cap(m["home_score"], m["away_score"]) < 1.0:
             notes.append("大胜弱队，Elo更新已封顶")
+        if v.get("message"):
+            notes.append(v["message"])
+
+        source = "espn+openfootball" if v["status"] == "match" else (
+            "openfootball" if v["status"] == "mismatch" else "espn"
+        )
 
         m.update(
             {
@@ -439,6 +482,7 @@ def sync(
                 "elo_update_weight_away": round(w_away, 3),
                 "result": result,
                 "synced_at": now,
+                "source": source,
                 "notes": "; ".join(notes) if notes else None,
             }
         )
@@ -461,8 +505,8 @@ def sync(
                 home_objective, away_objective, game_management_mode,
                 elo_update_weight_home, elo_update_weight_away,
                 home_elo_before, away_elo_before, home_elo_after, away_elo_after,
-                synced_at, notes
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                synced_at, source, verification_status, openfootball_score, notes
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(match_date, home_team_cn, away_team_cn) DO UPDATE SET
                 espn_event_id=excluded.espn_event_id,
                 group_name=excluded.group_name,
@@ -481,6 +525,9 @@ def sync(
                 home_elo_after=excluded.home_elo_after,
                 away_elo_after=excluded.away_elo_after,
                 synced_at=excluded.synced_at,
+                source=excluded.source,
+                verification_status=excluded.verification_status,
+                openfootball_score=excluded.openfootball_score,
                 notes=excluded.notes
             """,
             (
@@ -506,6 +553,9 @@ def sync(
                 None,
                 None,
                 m["synced_at"],
+                m["source"],
+                m["verification_status"],
+                m["openfootball_score"],
                 m["notes"],
             ),
         )
@@ -589,6 +639,11 @@ def sync(
                 (round(rating, 1), team),
             )
 
+        verify_msg = (
+            f"verify match={verify_match} mismatch={verify_mismatch} espn_only={verify_espn_only}"
+        )
+        if of_load_error:
+            verify_msg += f"; openfootball_error={of_load_error}"
         conn.execute(
             """
             INSERT INTO wc2026_sync_log
@@ -604,7 +659,7 @@ def sync(
                 updated,
                 len(elo_changed),
                 "ok",
-                f"synced {updated} matches",
+                f"synced {updated} matches; {verify_msg}",
             ),
         )
         conn.commit()
@@ -613,6 +668,9 @@ def sync(
         "fetched": len(fetched),
         "updated": updated,
         "elo_teams": len(elo_changed),
+        "verify_match": verify_match,
+        "verify_mismatch": verify_mismatch,
+        "verify_espn_only": verify_espn_only,
     }
 
 

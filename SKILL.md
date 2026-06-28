@@ -793,7 +793,9 @@ Use `scripts/` for deterministic computation. The AI explains and interprets res
 | `kelly_engine.py` | Kelly + EV 5-tier + **`quantize_stake` / `quantize_budget`** (2元/注票面量化) | Computing bet amounts from model probability and odds; **mandatory** before any Sporttery purchase output |
 | `multi_bookmaker_engine.py` | Sporttery dewatering + 17-company Asian handicap aggregation + direction conflict detection | Multi-source odds fusion and bias detection |
 | `odds_movement_engine.py` | Asian handicap water-level change detection (Δ≥0.06 triggers signal) + money flow inference | Detecting sharp market movement before kickoff |
-| `wc2026_results_sync.py` | ESPN post-match sync → `wc2026_match_records` + weighted Elo + motivation tags | **Daily cron after matchday**; full backfill `--from 20260611` |
+| `wc2026_results_sync.py` | ESPN sync → **openfootball cross-check** → `wc2026_match_records` + weighted Elo + motivation tags | **Daily cron after matchday**; full backfill `--from 20260611`; mismatch → openfootball score wins |
+| `openfootball_parser.py` | Parse openfootball/worldcup `cup.txt` + `cross_validate()` | Post-match score verification; CC0 backup source |
+| `knockout_engine.py` | Absence Elo penalty + Bayesian PK model (N=103 prior) + `resolve_knockout_winner()` | Knockout matches; edit `config/squad_absences.json` before kickoff; MC uses this instead of 50/50 PK |
 | `setup_wc2026_cron.sh` | Install/remove crontab (results 12:00&23:00 BJT + odds every 2h) | One-time deploy on tournament host |
 | `odds_snapshot_cron.py` | Scheduled odds snapshot capture → `odds_snapshots` table | Automated odds monitoring every 2 hours |
 | `odds_ev_analysis.py` | EV computation across all 6 lottery play types | Finding positive-EV options across HAD/HHAD/HAFU/CRS/TTG |

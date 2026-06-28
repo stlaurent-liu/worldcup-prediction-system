@@ -62,5 +62,29 @@
     "v5.8_ev_5pct": 0.0584,
     "high_confidence_accuracy": 0.706,
     "high_confidence_threshold": 0.6
+  },
+  "knockout_engine": {
+    "pk_prior_n": 103,
+    "pk_prior_win_rate": 0.5,
+    "pk_elo_scale": 250,
+    "host_group_elo_bonus": 100,
+    "host_nations": ["Mexico", "United States", "Canada"],
+    "use_absences_in_mc": true,
+    "absence_delta_threshold": 0.04,
+    "absence_elo_penalty": {
+      "star_goalkeeper": 50,
+      "star_striker": 45,
+      "star_midfielder": 35,
+      "star_defender": 30,
+      "suspension": 25,
+      "regular_starter": 15,
+      "doubtful": 8
+    },
+    "absences_file": "config/squad_absences.json"
+  },
+  "results_verification": {
+    "primary_source": "openfootball",
+    "fallback_source": "espn",
+    "openfootball_url": "https://raw.githubusercontent.com/openfootball/worldcup/master/2026--usa/cup.txt"
   }
 }

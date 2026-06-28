@@ -39,8 +39,19 @@ QDR = Quality*0.5 + Depth*0.3 + Reliability*0.2
 
 ### Monte Carlo Full Tournament Path
 ```bash
-node scripts/simulate-tournament.mjs --iterations 50000
+python3 scripts/monte-carlo-tournament.py --iterations 50000
 ```
+
+### Knockout Engine (`knockout_engine.py`)
+- **Penalty shootout**: Bayesian shrinkage with N=103 WC PK prior + Elo soft signal (scale 250)
+- **Absence Elo penalty**: edit `config/squad_absences.json` (CN keys); MC resolves via EN/CN alias
+- **Host bonus**: Mexico/USA/Canada +100 Elo in group stage only
+- MC knockout draws call `resolve_knockout_winner()` — not 50/50
+
+### Results Cross-Validation (`openfootball_parser.py`)
+- Fetches [openfootball/worldcup](https://github.com/openfootball/worldcup) `2026--usa/cup.txt` (CC0)
+- `wc2026_results_sync.py` cross-checks ESPN scores; on mismatch, **openfootball wins**
+- DB columns: `verification_status`, `openfootball_score`, `source`
 
 ## Pitfalls
 
