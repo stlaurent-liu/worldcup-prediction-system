@@ -794,7 +794,7 @@ Use `scripts/` for deterministic computation. The AI explains and interprets res
 | `multi_bookmaker_engine.py` | Sporttery dewatering + 17-company Asian handicap aggregation + direction conflict detection | Multi-source odds fusion and bias detection |
 | `odds_movement_engine.py` | Asian handicap water-level change detection (Δ≥0.06 triggers signal) + money flow inference | Detecting sharp market movement before kickoff |
 | `wc2026_results_sync.py` | ESPN sync → **openfootball cross-check** → `wc2026_match_records` + weighted Elo + motivation tags | **Daily cron after matchday**; full backfill `--from 20260611`; mismatch → openfootball score wins |
-| `openfootball_parser.py` | Parse openfootball/worldcup `cup.txt` + `cross_validate()` | Post-match score verification; CC0 backup source |
+| `openfootball_parser.py` | Parse `cup.txt` + `cross_validate()` + ESPN name canonicalization | Post-match verification; fix `espn_only` via `ESPN_NAME_CANONICAL` |
 | `knockout_engine.py` | Absence Elo penalty + Bayesian PK model (N=103 prior) + `resolve_knockout_winner()` | Knockout matches; edit `config/squad_absences.json` before kickoff; MC uses this instead of 50/50 PK |
 | `setup_wc2026_cron.sh` | Install/remove crontab (results 12:00&23:00 BJT + odds every 2h) | One-time deploy on tournament host |
 | `odds_snapshot_cron.py` | Scheduled odds snapshot capture → `odds_snapshots` table | Automated odds monitoring every 2 hours |
@@ -1047,6 +1047,20 @@ Returns: JSON with all selling matches, HAD + HHAD odds (some matches only have 
 ### Automated Monitoring
 
 **Post-match results cron (local Mac crontab, not Hermes):** `scripts/setup_wc2026_cron.sh --install` registers `wc2026_results_sync.py` at **12:00 and 23:00** daily (BJT). **Auto-retires on 2026-07-20 after the 23:00 run** (`scripts/cron_expiry.py`); 2030 世界杯前手动 `--install` again. Manual backfill: `python3 scripts/wc2026_results_sync.py --from 20260611`. DB: `data/football_database.sqlite`.
+
+**Post-match score cross-check (openfootball, mandatory):** Each synced match is validated against [openfootball/worldcup](https://github.com/openfootball/worldcup) `2026--usa/cup.txt` (CC0). Stored in `wc2026_match_records`:
+
+| `verification_status` | Meaning | Action |
+|:--|:--|:--|
+| `match` | ESPN score = openfootball | Use as-is; `source=espn+openfootball` |
+| `mismatch` | Scores differ | **Adopt openfootball score** for Elo replay |
+| `espn_only` | openfootball has no keyed fixture | Use ESPN; check **ESPN↔OF team alias** first |
+
+ESPN display names are normalized before lookup (`openfootball_parser.canonical_espn_name`). Known aliases: `Congo DR`→`DR Congo`, `Korea Republic`→`South Korea`, `Czech Republic`→`Czechia`, `USA`→`United States`, `Turkey`→`Türkiye`. If `espn_only` appears for a match that should exist, add the alias to `ESPN_NAME_CANONICAL` in `scripts/openfootball_parser.py` and re-run sync.
+
+Smoke test: `python3 scripts/test_knockout_openfootball.py`. As of 2026-06-28 group stage: **70/70 `match`**, 0 mismatch.
+
+**Knockout absence + PK:** Before knockout kickoff, edit `config/squad_absences.json` (Chinese team keys OK). `knockout_engine.py` applies tiered Elo penalties and Bayesian PK (N=103 prior). Monte Carlo knockouts call `resolve_knockout_winner()` — not 50/50.
 
 Odds snapshot cron: `scripts/odds_snapshot_cron.py` runs every 2 hours, captures Sporttery odds into `odds_snapshots` SQLite table.
 

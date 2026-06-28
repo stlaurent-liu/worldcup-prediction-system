@@ -39,6 +39,8 @@
 
 - `wc2026_results_sync.py`：ESPN 赛果 → **openfootball 交叉校验** → 动机标签 → **加权 Elo** 更新
 - 比分冲突时以 [openfootball/worldcup](https://github.com/openfootball/worldcup) 为准
+- `verification_status`：`match` / `mismatch` / `espn_only`（队名别名如 `Congo DR`→`DR Congo` 已处理）
+- 截至 6/28 小组赛：**70/70 校验通过**
 - 本机 cron（12:00 / 23:00 BJT），**2026-07-20 自动卸载**
 
 ### 淘汰赛增强（借鉴 targetFuseLab）
@@ -106,7 +108,8 @@ bash scripts/setup_wc2026_cron.sh --remove     # 手动卸载
 |--------|---------|
 | `wc2026_results_sync.py` | ESPN 赛果 + openfootball 校验 + 动机标签 + Elo |
 | `knockout_engine.py` | 淘汰赛缺阵扣减 + 点球贝叶斯模型 |
-| `openfootball_parser.py` | openfootball 赛果解析与交叉验证 |
+| `openfootball_parser.py` | openfootball 赛果解析 + ESPN 队名规范化 |
+| `test_knockout_openfootball.py` | 校验/点球引擎冒烟测试 |
 | `kelly_engine.py` | Kelly / EV + `quantize_stake`（2元/注） |
 | `odds_ev_analysis.py` | 六种玩法 EV 扫描 |
 | `multi_bookmaker_engine.py` | 多庄家去水聚合 |
