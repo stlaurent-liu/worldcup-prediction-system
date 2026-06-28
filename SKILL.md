@@ -1,6 +1,6 @@
 ---
 name: world-cup-prediction
-description: Generate World Cup match prediction decision systems by current time, tournament stage, and customer mode. Use for prematch or in-play analysis, group qualification objectives, same-group live-score dependency, knockout advancement paths, lineups, odds value, weather, market context, cashout/hold guidance, score ranges, spending guardrails, and forced-remodel rules.
+description: 体彩竞彩/彩票票据截图分析、六种玩法EV与串关优化。世界杯预测决策系统：赛前/赛中分析、出线动机、同组依赖、淘汰赛路径、赔率价值、止损止盈、强制改模。Use when user sends lottery screenshots, 竞彩投注单, or asks for match prediction.
 ---
 
 # World Cup Prediction
@@ -790,9 +790,11 @@ Use `scripts/` for deterministic computation. The AI explains and interprets res
 
 | Script | Function | When to use |
 |:--|:--|:--|
-| `kelly_engine.py` | Kelly position sizing + EV 5-tier classification + graded allocation | Computing bet amounts from model probability and odds |
+| `kelly_engine.py` | Kelly + EV 5-tier + **`quantize_stake` / `quantize_budget`** (2元/注票面量化) | Computing bet amounts from model probability and odds; **mandatory** before any Sporttery purchase output |
 | `multi_bookmaker_engine.py` | Sporttery dewatering + 17-company Asian handicap aggregation + direction conflict detection | Multi-source odds fusion and bias detection |
 | `odds_movement_engine.py` | Asian handicap water-level change detection (Δ≥0.06 triggers signal) + money flow inference | Detecting sharp market movement before kickoff |
+| `wc2026_results_sync.py` | ESPN post-match sync → `wc2026_match_records` + weighted Elo + motivation tags | **Daily cron after matchday**; full backfill `--from 20260611` |
+| `setup_wc2026_cron.sh` | Install/remove crontab (results 12:00&23:00 BJT + odds every 2h) | One-time deploy on tournament host |
 | `odds_snapshot_cron.py` | Scheduled odds snapshot capture → `odds_snapshots` table | Automated odds monitoring every 2 hours |
 | `odds_ev_analysis.py` | EV computation across all 6 lottery play types | Finding positive-EV options across HAD/HHAD/HAFU/CRS/TTG |
 | `monte-carlo-tournament.py` | Monte Carlo tournament simulation (50,000 iterations) | Group qualification probability, knockout bracket paths |
@@ -899,7 +901,7 @@ Historical mean Poisson backtest (4,944 international matches, 500 sampled): 56.
 
 ## Chinese Sports Lottery Betting System
 
-When the user is betting on China Sports Lottery (体彩竞彩), use the full 6-play-type system. Do not only check HAD (胜平负) — always scan all available play types.
+When the user is betting on China Sports Lottery (体彩竞彩), use the full 6-play-type system. **Read `references/sporttery-vs-overseas-rules.md` first** — never map overseas Asian handicap / over-under 2.5 directly to Sporttery play types. Do not only check HAD (胜平负) — always scan all available play types. For lottery ticket screenshots, follow `references/lottery-ticket-analysis.md` (see **Handling User-Provided Screenshots** below).
 
 ### 6 Play Types
 
@@ -935,6 +937,31 @@ Lambda selection:
 | All negative EV | 5.0 | Minimize loss |
 | 3+ consecutive losing days | 5.0 | Stop-loss mode |
 
+**After Markowitz/Kelly, always run Sporttery stake quantization.** Overseas books accept continuous amounts; 体彩 only accepts `票面金额 = 注数 × 2元 × 倍数`. Never output purchase advice as a bare decimal like `58.3元` without 注数/倍数.
+
+### Stake Quantization (2元/注, mandatory for purchase output)
+
+Official rule ([胜平负游戏规则](https://www.sporttery.cn/help/60333.html?gid=2)): **每注 2 元**; ticket face value = `注数 × 2元 × 倍数`; single ticket max **20,000 元**. Overseas staking is continuous — do not reuse overseas dollar amounts as 竞彩票面.
+
+**Workflow (after Markowitz/Kelly, before ticket labeling):**
+
+1. Compute ideal continuous amount `b_i` per option (reference only).
+2. Set `ticket_count`: single selection = 1; 复式 = combination count (e.g. 2 options on one leg of 2串1 → 2注).
+3. Run `quantize_stake(b_i, ticket_count)` or `quantize_budget(allocations, budget, ticket_counts)` from `scripts/kelly_engine.py`.
+4. Output **注数 + 倍数 + 票面金额** for every line; optional `理想金额` for transparency.
+5. If `unallocated_yuan > 0` (budget remainder &lt; 2元 step), say so — merge into top-EV item or leave unbet.
+6. **Forbidden:** `建议买 73.5元` with no 注/倍; fractional yuan that cannot be ticketed.
+
+**Preferred pattern for simple singles:** `1注 × 2元 × N倍 = 票面` (easy to enter in the App).
+
+**复式 warning:** selecting multiple scores/options multiplies `注数` before multiplier — e.g. 3 score picks in one 2串1 leg = 3注 minimum = 6元 at 1倍.
+
+| | 体彩竞彩 | 外盘 |
+|:--|:--|:--|
+| Min unit | 2元/注 | ~$1 or less, continuous |
+| Amount formula | 注数 × 2 × 倍数 |任意金额 |
+| Markowitz output | Must quantize | Can use as-is |
+
 ### Capital Preservation Strategy
 
 When the user wants to maximize "break-even probability" within a budget:
@@ -947,12 +974,26 @@ Remainder: B_extra = B - B_base → bet on highest-odds option for upside
 
 Applicable when: 1/d₁ + 1/d₂ < 1 (two outcomes' dewatered probabilities sum < 100%).
 
+### Sporttery Rules (vs Overseas)
+
+**Boundary rule:** Overseas odds (Asian handicap, O/U 2.5, DNB) are for **probability reference only**. Output tickets must use Sporttery play types (HAD/HHAD/CRS/TTG/HAFU) and pass `singleList` verification. Full对照表见 `references/sporttery-vs-overseas-rules.md`.
+
+**Pre-ticket checklist (mandatory):**
+1. `getMatchListV1` → which poolCodes are on sale (HAD may be missing entirely)
+2. `getFixedBonusV1` → `singleList`: `single:1` = 可单关, `single:0` = 仅过关
+3. If user asks for "Team X win" but HAD not sold → map to HHAD option and explain semantic difference
+4. Label singles as **浮动奖金**, parlays as **固定奖金**
+5. **Quantize every stake** to 注数 × 2元 × 倍数; total face value must match user budget in 2-yuan steps
+
 ### Parlay Rules
 
 - Same-match different play types cannot be parlayed (illegal): ❌ Mexico HAD × Mexico TTG
 - Cross-match parlay is legal: ✅ Mexico HAD × Korea TTG
 - Barrel principle: max legs = lowest among included play types
-- CRS/BQC does not support single-leg bets
+- **All play types** (HAD/HHAD/CRS/TTG/HAFU) use **per-match** single availability (场次开放制) — HAD is NOT always single-eligible; verify `singleList` every match
+- **Any single bet** = 浮动奖金; **any parlay** = 固定奖金 (not CRS-only)
+- HAFU/BQC settlement uses **raw** HT/FT results — **not** handicap-adjusted
+- Do **not** force into 2串1 when single is open — prefer singles for dispersion unless parlay EV clearly justifies it
 - Score parlays have worst ROI (-85.7%), limit to ≤10% budget for upset fishing
 
 ### Bet Ticket Labeling
@@ -962,6 +1003,16 @@ Every ticket must show:
 2. Full team names in Chinese (加拿大 ⚔ 波黑)
 3. Play type name (胜平负/让球胜平负(-1)/比分/总进球/半全场)
 4. Plain-language explanation (如"波黑不败" not just "让负")
+
+## AgentKey Fallback Rule
+
+When the user asks for sports data and `mcp_agentkey_find_tools` does not return a usable sports/odds/live-score tool, **do not keep retrying search**. Fall back immediately to the skill's own data sources:
+
+1. `references/wc2026-corrected-schedule.md` for fixtures.
+2. Sporttery API via direct curl for Chinese-market odds (`webapi.sporttery.cn/gateway/uniform/football/getMatchListV1.qry?clientCode=3001` with `User-Agent` + `Referer`).
+3. `references/data-source-availability.md` to decide whether a source is worth attempting at all.
+
+AgentKey is great for general web/news retrieval, but it is **not a reliable discovery layer for niche sports APIs**. Treat an empty/low-relevance sports tool search as a signal to use the skill's internal pipeline, not as a blocker.
 
 ## Data Collection Pipeline
 
@@ -986,12 +1037,73 @@ Sporttery API caveat: `businessDate` is match local time, NOT Beijing time. A 03
 ```text
 GET https://webapi.sporttery.cn/gateway/uniform/football/getMatchListV1.qry?clientCode=3001
 Headers: User-Agent: Mozilla/5.0, Referer: https://www.sporttery.cn/
-Returns: JSON with 22+ matches, HHAD + HAFU odds
+Returns: JSON with all selling matches, HAD + HHAD odds (some matches only have HHAD)
 ```
+
+**⚠️ Not all matches offer HAD.** Some matches (e.g. Senegal vs Iraq, NZ vs Belgium on 6/27) only have HHAD in sale. Always check all poolCodes. See `references/sporttery-json-format.md` for full poolCode mapping and reliable parse code.
 
 ### Automated Monitoring
 
-Odds snapshot cron: `scripts/odds_snapshot_cron.py` runs every 2 hours, captures Sporttery odds into `odds_snapshots` SQLite table. Deploy as Hermes cron job for automated monitoring.
+**Post-match results cron (local Mac crontab, not Hermes):** `scripts/setup_wc2026_cron.sh --install` registers `wc2026_results_sync.py` at **12:00 and 23:00** daily (BJT). **Auto-retires on 2026-07-20 after the 23:00 run** (`scripts/cron_expiry.py`); 2030 世界杯前手动 `--install` again. Manual backfill: `python3 scripts/wc2026_results_sync.py --from 20260611`. DB: `data/football_database.sqlite`.
+
+Odds snapshot cron: `scripts/odds_snapshot_cron.py` runs every 2 hours, captures Sporttery odds into `odds_snapshots` SQLite table.
+
+### International Data Collection (Non-Chinese Sources)
+
+For matches where Sporttery/500.com data is insufficient or when collecting international standings, odds, weather, and lineup projections outside China:
+
+**Reliable standings verification (2026-06-27 tested):**
+
+ESPN standings page is the most reliable source for live group standings:
+```python
+# browser_navigate to https://www.espn.com/soccer/standings/_/league/fifa.world
+# browser_console evaluate JavaScript to extract text:
+#   document.body.innerText
+# Returns all 12 groups with GP/W/D/L/F/A/GD/P for each team
+# Parse by splitting on "Group X" headers
+```
+
+Use AgentKey `Surf/search-web` to gather:
+- Current group standings and results (cross-verify across Yahoo Sports, CBS Sports, ESPN)
+- Betting odds from multiple bookmakers (DraftKings, totalfootballanalysis, sportsgambler)
+- Weather forecast for the venue (local NBC affiliates, Climate Central)
+- Predicted lineups (SI.com, Yahoo Sports)
+- Injury updates and team news
+
+**⚠️ Known data source issues (2026-06-27):**
+- Google search from Hermes browser → CAPTCHA blocked. Do not use.
+- Bing search → poor result quality for sports standings. Do not use.
+- AgentKey Surf/search-web → reliable but can disconnect mid-session. Capture critical data early.
+- CBS Sports page → 60s timeout. Do not use.
+- ESPN standings page → reliable, fast, extractable via console JS. **Preferred method.**
+
+Workflow:
+1. Verify match exists in `references/wc2026-corrected-schedule.md` and team names in `references/team-name-cn.md`
+2. Query Sporttery API first (`getMatchListV1.qry?clientCode=3001`) — if match is listed, extract matchNum and businessDate
+3. **Verify group standings via ESPN standings page** (preferred) or search "World Cup 2026 Group X standings" — cross-verify 2+ sources
+4. Search "TeamA vs TeamB odds lineup weather" for match-specific data
+5. Cross-verify key facts (score results, standings, odds) across 2+ sources before marking as `verified`
+6. Run Elo → Poisson → Fusion model with collected data
+7. Apply group stage incentive model using verified standings (MANDATORY: never assume both teams need points)
+8. Mark web-sourced data with verification status in output
+
+Pitfall: Sporttery API returns team names in Chinese only. Use `references/team-name-cn.md` to map before cross-referencing with English-language web search results.
+
+## Handling User-Provided Screenshots
+
+When the user sends a screenshot or photo of their lottery app (体彩竞彩界面), betting ticket, or 投注单:
+
+**MANDATORY — do NOT substitute casual image reading for the skill workflow.** Native vision reads the pixels; this skill supplies the analysis framework (6 play types, EV, parlay risk, optimization).
+
+1. **Load workflow references first** (if not already in context): `skill_view("world-cup-prediction")` and `skill_view("world-cup-prediction", "references/lottery-ticket-analysis.md")`. Skipping this produces shallow "I see your bet is X" instead of EV-based analysis.
+2. **Use native multimodal vision to read the image.** Hermes' main model is vision-capable; Feishu and most chat platforms deliver attached images inline — read match numbers, teams, play types, selections, and odds directly without tool calls. Vision and skill workflow are complementary, not either/or.
+3. **Run the ticket analysis pipeline** from `references/lottery-ticket-analysis.md`: extract options → model probability → EV per option → identify problems (all negative EV? too many parlays?) → optimization advice. Output structured analysis.
+4. **Merge image + user text.** If the user also states constraints (available play types, parlay size, budget), combine both immediately — don't block on image verification.
+5. **If the image is not visible** (rare on vision-capable models), ask once: "我看不清图片——能告诉我场次编号、对阵和赔率吗？" Do NOT spend more than 1-2 tool calls on workarounds.
+6. **Never open the image in Preview and try cua-driver/computer_use capture.** This is expensive, unreliable (localized app names like 预览 break capture), and wastes 10+ tool calls. The image cache path (`~/.hermes/image_cache/`) is a local file — either the model sees it natively, or it doesn't; screen capture adds no value.
+7. **Ask for specific missing data.** If odds, match numbers, or kick-off times are unclear from the image, ask one focused question.
+
+Pitfall history: (a) agent spent 10+ cua-driver calls on Preview screen capture and never succeeded; (b) agent read the image natively via multimodal vision but skipped the skill entirely, frustrating the user who expected EV analysis and optimization advice.
 
 ## Post-Match Settlement Loop
 
@@ -1015,7 +1127,7 @@ Final whistle → Per-ticket settlement (template: references/post-match-settlem
 
 - **Model**: Poisson draw structural defect, Elo-xG uncorrelated (R²=0.0095), draw correction must scale with Elo gap
 - **Data sources**: WhoScored second-request 403, 500.com gb2312 encoding, Sporttery date timezone offset
-- **Betting**: Same-match parlay illegal, score parlay worst ROI (-85.7%), must check all 6 play types
+- **Betting**: Same-match parlay illegal; all play types per-match single eligibility (`singleList`); HAD may be unsold; never map overseas AH/O-U to Sporttery; HAFU not handicap-adjusted; score parlay worst ROI (-85.7%); **2元/注** — Markowitz amounts must be quantized via `quantize_stake` before purchase output (overseas continuous stakes invalid on Sporttery)
 - **Scraping**: 3 regex failures → change approach, zgzcw 3-layer WAF impassable, Wikipedia Elo unreliable
 
 ## Module Navigation
@@ -1025,16 +1137,17 @@ Use these bundled files for detailed implementation guidance:
 ### Modules (`modules/`)
 - `data-collection.md` — Data collection methods (500.com/Sporttery/Titan007 URL patterns + parsing)
 - `model-engine.md` — Elo + Poisson + xG + GBM + Monte Carlo engine details
-- `odds-analysis.md` — Lottery rules, Asian handicap, over/under, market sentiment
+- `odds-analysis.md` — Odds/value analysis; overseas AH/O-U for reference only, map to Sporttery plays for tickets
 - `backtest.md` — Backtest framework + calibration curves
 - `betting-strategy.md` — Mean-variance optimization + 6 play-type rules
 - `report-generation.md` — Chinese report formatting + visualization
 - `validation.md` — Hypothesis testing, feature effectiveness, methodology audit
 
 ### Key References (`references/`)
-- `elo-calibration-20260614.md` — 48-team calibrated Elo table
+- `elo-calibration-20260614.md` — 48-team calibrated Elo table (incl. 2026-06-27 supplemental estimates for 9 previously-missing teams)
 - `poisson-lambda-solver-v2.md` — Poisson λ reverse algorithm (Newton iteration)
 - `backtest-results-v6.md` — v6.0 full backtest results
+- `sporttery-vs-overseas-rules.md` — **体彩 vs 外盘规则分界（出票前必读）**
 - `complete-betting-rules.md` — Complete lottery betting rules
 - `card-layout-standard.md` — Report card layout standard
 - `team-name-cn.md` — 48-team Chinese-English name mapping
@@ -1043,7 +1156,11 @@ Use these bundled files for detailed implementation guidance:
 - `weak-home-strong-away-strategy.md` — Weak home vs strong away betting strategy
 - `post-match-settlement.md` — Post-match settlement template
 - `data-source-availability.md` — Data source availability status table
+- `sporttery-json-format.md` — Sporttery API JSON format + poolCode mapping (updated 2026-06-27 with HAD-not-available finding and reliable parse code)
+- `multi-match-budget-allocation.md` — Multi-match budget allocation workflow (Step-by-step: verify odds → verify standings → model → incentive → EV sort → Markowitz → output)
 - `upgrades-v7-20260614.md` — 7 model upgrades overview (Kelly, multi-bookmaker, movement, snapshot, age-peak, hot-trap, settlement)
+- `merge-history-20260626.md` — Merge history: how this skill was combined from Hermes decision framework + feibang191 GitHub quantitative engine
+- `merge-history-20260626.md` — Merge history: how this skill was combined from Hermes decision framework + feibang191 GitHub quantitative engine
 
 ### Config (`config/`)
 - `calibrated-model.json` — Calibrated model parameters (weights, thresholds, backtest seasons)

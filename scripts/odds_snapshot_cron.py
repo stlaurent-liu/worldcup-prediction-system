@@ -9,7 +9,8 @@ ssl_context = ssl.create_default_context()
 ssl_context.check_hostname = False
 ssl_context.verify_mode = ssl.CERT_NONE
 
-DB_PATH = r".\football_database.sqlite"
+from cron_expiry import TOURNAMENT_CRON_LAST_DAY, guard_cron_at_start, maybe_retire_cron_after_run
+from db_path import get_db_path
 
 def capture():
     url = "https://webapi.sporttery.cn/gateway/uniform/football/getMatchListV1.qry?clientCode=3001"
@@ -22,7 +23,7 @@ def capture():
     data = json.loads(resp.read().decode("utf-8"))
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(get_db_path())
     for biz in data.get("value", {}).get("matchInfoList", []):
         for sub in biz.get("subMatchList", []):
             h = sub.get("homeTeamAllName", "")
@@ -55,4 +56,6 @@ def capture():
     print(f"[{ts}] OK - 赔率快照已保存")
 
 if __name__ == "__main__":
+    guard_cron_at_start("odds_snapshot_cron")
     capture()
+    maybe_retire_cron_after_run("odds_snapshot_cron")

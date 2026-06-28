@@ -1,0 +1,5 @@
+.env
+数据/
+*.sqlite
+__pycache__/
+*.pyclogs/
